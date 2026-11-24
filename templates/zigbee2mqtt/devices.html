@@ -722,11 +722,11 @@
 -->
 <a href="#" onclick="return switch_z2m([#DEVID#],'state','toggle','[#IEEEADDR#]','[#GW#]', '','result[#ID#]');"   title="Переключить">
 
-[#if SELECTTYPE<>""#]		<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" alt="Device Logo"></a>
+[#if SELECTTYPE<>""#]		<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" alt="Device Logo" onerror="this.onerror=null;this.src='../templates/zigbee2mqtt/img/unknow.jpg'"></a>
 [#else SELECTTYPE#]	<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/unknow.jpg" alt="Unknow Logo"></a>[#endif SELECTTYPE#] 
 
 [#else#]
-[#if SELECTTYPE<>""#]		<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" alt="Device Logo">
+[#if SELECTTYPE<>""#]		<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" alt="Device Logo" onerror="this.onerror=null;this.src='../templates/zigbee2mqtt/img/unknow.jpg'">
 [#else SELECTTYPE#]	<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/unknow.jpg" alt="Unknow Logo">
 
 </a>[#endif SELECTTYPE#]

@@ -743,6 +743,22 @@ else
             return 0;
         }
 
+        if (preg_match('~^([^/]+)/bridge/devices$~D', $path, $bridge)) {
+            $devices = json_decode($value, true);
+            if (is_array($devices)) {
+                $this->updateBridgeDevices($devices, $bridge[1]);
+            }
+            return;
+        }
+
+        if (preg_match('~^[^/]+/bridge/state$~D', $path)) {
+            $state = json_decode($value, true);
+            if (isset($state['state']) && in_array($state['state'], array('online', 'offline'), true)) {
+                $this->processMessage2($path . '/state', $state['state']);
+                $value = $state['state'];
+            }
+        }
+
         if (preg_match('/^{/', $value)) {
 
 // debmes('Полученное сообщение содержит json:'.$value ,'zigbee2mqtt2');
@@ -794,7 +810,8 @@ else
 
 //debmes('Получено  в processMessage2 '.$path. 'value '.$value,'zigbee2mqtt2');
 
-        unset($msgtype);
+        $json = null;
+        $need = false;
 
         $this->getConfig();
 //$zz=substr(explode('/',$this->config['MQTT_QUERY'])[0],1);
@@ -843,7 +860,7 @@ else
             || $path == '/bridge/networkmap/graphviz'
         ) {
             $json = json_decode($value);
-            $msgtype = $json->{'type'};
+            $msgtype = $json->{'type'} ?? $msgtype;
 //debmes('Пришло важное сообщение, поместим его в журнал :'.$path." value:". $value." type:".$json->{'type'},'zigbee2mqtt');
 //список исключений, по которым лог не храним
             $arr2 = sqlselect('select IEEEADDR from  zigbee2mqtt_devices  where HISTORY="0"');
@@ -903,7 +920,7 @@ else
 //////////////////////
 //////////////////////
 //////////////////////
-        if ($json->{'type'} == 'devices') {
+        if ($msgtype == 'devices') {
 
 //if (ZMQTT_DEBUG=="1" ) debmes('справочник устройств:','zigbee2mqtt');
 
@@ -911,7 +928,7 @@ else
             $this->parse_deviceinfo($json, $gw);
         }
 
-        if ($json->{'type'} == 'groups') {
+        if ($msgtype == 'groups') {
             $this->update_groups($json);
         }
 
@@ -943,37 +960,54 @@ else
     function update_default($path, $value)
     {
 
-        $dev_title = explode('/', $path)[1];
-        $gw = explode('/', $path)[0];
+        list($gw, $suffix) = explode('/', $path, 2) + array(1 => '');
+        if ($suffix === '') {
+            return;
+        }
+        $dev_title = explode('/', $suffix, 2)[0];
+        $gateway = DBSafe($gw);
+        $topic = DBSafe($suffix);
+        $device = DBSafe($dev_title);
 
 //debmes('path: '.$path .' value: '. $value, 'z2m_update_default');
 
 //		    echo $cnt;
 
 
-        $sql = "SELECT * FROM zigbee2mqtt_devices WHERE IEEEADDR LIKE '%" . DBSafe($dev_title) . "%'";
-        $rec = SQLSelectOne($sql);
-        if (!$rec['ID']) {
-            $sql = "SELECT * FROM zigbee2mqtt_devices WHERE TITLE LIKE '" . DBSafe($dev_title) . "'";
-            $rec = SQLSelectOne($sql);
+        if ($dev_title === 'bridge') {
+            $rec = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE TITLE='bridge' AND GW IN ('$gateway','') ORDER BY (GW='$gateway') DESC, ID");
+        } else {
+            $rec = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE GW='$gateway' AND Z2M_TOPIC<>'' AND
+                (BINARY Z2M_TOPIC=BINARY '$topic' OR BINARY LEFT('$topic', CHAR_LENGTH(Z2M_TOPIC)+1)=BINARY CONCAT(Z2M_TOPIC,'/'))
+                ORDER BY CHAR_LENGTH(Z2M_TOPIC) DESC, ID");
+            if (empty($rec['ID'])) {
+                $rec = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE GW IN ('$gateway','') AND
+                    (IEEEADDR='$device' OR (Z2M_TOPIC='' AND BINARY TITLE=BINARY '$device'))
+                    ORDER BY (IEEEADDR='$device') DESC, (GW='$gateway') DESC, ID");
+            }
+        }
+        if ($value === '' && $dev_title !== 'bridge' && ($rec['Z2M_TOPIC'] ?? '') === $suffix) {
+            return;
         }
 
 //if (ZMQTT_DEBUG=="1" ) debmes('апдейтим zigbee2mqtt_devices: '.$sql, 'zigbee2mqtt');
 //                         $rec['TITLE']=$dev_title;
-        if (!$rec['ID']) {
+        if (empty($rec['ID'])) {
             $rec['TITLE'] = $dev_title;
         }
 
-        $rec['IEEEADDR'] = $dev_title;
+        if (empty($rec['IEEEADDR'])) {
+            $rec['IEEEADDR'] = $dev_title;
+        }
         $rec['FIND'] = date('Y-m-d H:i:s');
+        $rec['GW'] = $gw;
 
         if ($dev_title == 'bridge') {
-//                    if (ZMQTT_DEBUG=="1" ) debmes('это шлюз',zigbee2mqtt);
-            $cnt = SQLSelectOne("SELECT count(*) cnt FROM zigbee2mqtt_devices WHERE TITLE ='bridge'")['cnt'];
-
-            $rec['FIND'] = date('Y-m-d H:i:s');
-            if ($cnt == 0) {
-                SQLInsert('zigbee2mqtt_devices', $rec);
+            if ($suffix === 'bridge/state' && in_array($value, array('online', 'offline'), true)) {
+                $rec['STATUS'] = $value;
+            }
+            if (empty($rec['ID'])) {
+                $rec['ID'] = SQLInsert('zigbee2mqtt_devices', $rec);
             } else {
                 SQLUpdate('zigbee2mqtt_devices', $rec);
             }
@@ -981,11 +1015,11 @@ else
         } ///не бридж
         else {
 
-            if (!$rec['ID']) { /* If path_write foud in db */
+            if (empty($rec['ID'])) { /* If path_write foud in db */
 
 
 //проверяем, новая тема  по группе или устройству
-                $grl = SQLSelectOne('Select * from zigbee2mqtt_grouplist where TITLE="' . $dev_title . '"');
+                $grl = SQLSelectOne("SELECT * FROM zigbee2mqtt_grouplist WHERE TITLE='$device'");
                 if ($grl['ID']) {
                     $rec['SELECTTYPE'] = 'group';
                     $rec['SELECTVENDOR'] = 'group';
@@ -1002,7 +1036,7 @@ else
 //if   ($rec['TITLE']=='bridge')  {      $rec['IEEEADDR']='bridge2';}
 //if   (strpos($rec['TITLE'], 'group')>0)  {      $rec['SELECTTYPE']='group';$rec['SELECTVENDOR']='group';}
 //print_r($rec);
-                SQLInsert('zigbee2mqtt_devices', $rec);
+                $rec['ID'] = SQLInsert('zigbee2mqtt_devices', $rec);
 
 
 //если устройство новое, запросим список устройств у контроллера
@@ -1017,15 +1051,14 @@ else
 //$zz=explode('/',$query_list[$i])[0];
 
 //
-                SQLExec("update  zigbee2mqtt set VALUE='' where TITLE='$gw/bridge/log'");
-                $this->sendcommand($gw . '/bridge/config/devices', '');
+                if (empty(SQLSelectOne("SELECT ID FROM zigbee2mqtt_devices WHERE GW='$gateway' AND TYPE='Coordinator' AND Z2M_TOPIC<>''")['ID'])) {
+                    SQLExec("update zigbee2mqtt set VALUE='' where TITLE='$gateway/bridge/log'");
+                    $this->sendcommand($gw . '/bridge/config/devices', '');
+                }
             } else {
 //обновляем дату время имеющегося устройства
 
 //if (ZMQTT_DEBUG=="1" ) debmes('устройство уже зарегистрировано в системе   zigbee2mqtt_devices: '.$sql, 'zigbee2mqtt');
-                $rec['IEEEADDR'] = $dev_title;
-                $rec['FIND'] = date('Y-m-d H:i:s');
-                $rec['GW'] = $gw;
                 SQLUPDATE('zigbee2mqtt_devices', $rec);
             }
 
@@ -1035,9 +1068,11 @@ else
 //   $dev_id=SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE TITLE LIKE '%".DBSafe($dev_title)."%'")['ID'];
 
 
-        $sql = "SELECT * FROM zigbee2mqtt_devices WHERE IEEEADDR LIKE '%" . DBSafe($dev_title) . "%'";
-//if (ZMQTT_DEBUG=="1" ) debmes($sql, 'zigbee2mqtt');
-        $dev_id = SQLSelectOne($sql)['ID'];
+        $dev_id = (int)$rec['ID'];
+        if (!$dev_id) {
+            return;
+        }
+        $modernDevice = !empty($rec['Z2M_TOPIC']);
 
 ////////////////////////////////////
 //$sql="SELECT * FROM zigbee2mqtt WHERE PATH LIKE '".DBSafe($path)."'";
@@ -1051,19 +1086,15 @@ else
         $nnpath = substr($path, stripos($path, '/', 0));
         $metrika = substr($path, strrpos($path, '/') + 1);
 
-        if (strrpos($path, 'bridge') > 0) {
-            $sql = "SELECT * FROM zigbee2mqtt WHERE PATH LIKE '%$npath%' and METRIKA='$metrika'";
-        } else {
-            $sql = "SELECT * FROM zigbee2mqtt WHERE PATH LIKE '%$nnpath%' and METRIKA='$metrika'";
+        $rec = SQLSelectOne("SELECT * FROM zigbee2mqtt WHERE BINARY PATH=BINARY '" . DBSafe($path) . "' ORDER BY (DEV_ID=$dev_id) DESC, ID");
+        if (empty($rec['ID']) && !$modernDevice) {
+            $match = DBSafe($dev_title === 'bridge' ? $npath : $nnpath);
+            $metric = DBSafe($metrika);
+            $rec = SQLSelectOne("SELECT * FROM zigbee2mqtt WHERE DEV_ID IN ($dev_id,0) AND PATH LIKE '%$match%' AND METRIKA='$metric'");
         }
 
 
-//debmes($sql, 'zigbee2mqtt');
-//debmes($sql, 'z2m_migration');
-        $rec = SQLSelectOne($sql);
-
-
-        if (!$rec['ID']) { /* If 'PATH' not found in db */
+        if (empty($rec['ID'])) { /* If 'PATH' not found in db */
             /* New query to search 'PATH_WRITE' record in db *//*
      $rec=SQLSelectOne("SELECT * FROM zigbee2mqtt WHERE PATH LIKE '".DBSafe($path)."'");
 
@@ -1656,7 +1687,7 @@ else
             $out['IEEEADDR'] = $res['IEEEADDR'];
             $out['NWKADDR'] = $res['NWKADDR'];
             $out['MANUFID'] = $res['MANUFID'];
-            $out['MANUFNAME'] = $res['MANUFNAME'];
+            $out['MANUFNAME'] = htmlspecialchars($res['MANUFNAME'], ENT_QUOTES, 'UTF-8');
             $out['PARRENTIEEEADDR'] = $res['PARRENTIEEEADDR'];
             $out['LQI'] = $res['LQI'];
             $out['POWERSOURCE'] = $res['POWERSOURCE'];
@@ -1676,8 +1707,8 @@ else
             $out['HISTORY'] = $res['HISTORY'];
 
 
-            $res1 = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices_list where model='" . $res['SELECTTYPE'] . "'");
-            $out['MODELNAME'] = $res1['model'];
+            $res1 = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices_list where model='" . DBSafe($res['SELECTTYPE']) . "'");
+            $out['MODELNAME'] = $res['MODEL'] ?: ($res1['model'] ?? '');
 
 //$out['SELECTVENDOR']=$res1['vendor'];
 
@@ -1696,13 +1727,13 @@ else
             }
 
 
-            $out['VENDOR'] = str_replace($res1['vendor'], '/', '-');
-            $out['DESCRIPTION'] = $res1['description'];
+            $out['VENDOR'] = htmlspecialchars($res['MANUFACTURE'] ?: ($res1['vendor'] ?? ''), ENT_QUOTES, 'UTF-8');
+            $out['DESCRIPTION'] = htmlspecialchars(($res['Z2M_DESCRIPTION'] ?? '') ?: ($res1['description'] ?? ''), ENT_QUOTES, 'UTF-8');
 
 //$out['DESCRIPTION']=SQLSelectOne("SELECT * FROM zigbee2mqtt_devices_list where zigbeeModel='".$res['MODELID']."'");
 
             $out['EXTEND'] = $res1['extend'];
-            $out['SUPPORTS'] = $res1['supports'];
+            $out['SUPPORTS'] = htmlspecialchars(($res['Z2M_EXPOSES'] ?? '') ?: ($res1['supports'] ?? ''), ENT_QUOTES, 'UTF-8');
             $out['FROMZIGBEE'] = $res1['fromZigbee'];
             $out['TOZIGBEE'] = $res1['toZigbee'];
 
@@ -3704,6 +3735,120 @@ SQLIsert('zigbee2mqtt_devices', $res2);
 
     }
 
+    function updateBridgeDevices($devices, $gw)
+    {
+        $gateway = DBSafe($gw);
+        foreach ($devices as $device) {
+            if (!is_array($device) || !preg_match('/^0x[0-9a-f]{16}$/iD', $device['ieee_address'] ?? '')) {
+                continue;
+            }
+            $ieee = strtolower($device['ieee_address']);
+            $coordinator = ($device['type'] ?? '') === 'Coordinator';
+            $name = $coordinator ? 'bridge' : (($device['friendly_name'] ?? '') ?: $ieee);
+            $topic = DBSafe($name);
+            if ($coordinator) {
+                $row = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE TITLE='bridge' AND GW IN ('$gateway','') ORDER BY (GW='$gateway') DESC, ID");
+                $existing = $row;
+                foreach (array('MODEL', 'MODELID', 'TYPE', 'SELECTTYPE', 'MANUFACTURE', 'SELECTVENDOR', 'MANUFNAME') as $field) {
+                    if (in_array(strtolower($row[$field] ?? ''), array('cc2531', 'ti', 'texas instruments', 'parse_deviceinfo'), true)) {
+                        $row[$field] = '';
+                    }
+                }
+            } else {
+                $row = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE IEEEADDR='$ieee' AND TITLE<>'bridge' AND GW IN ('$gateway','') ORDER BY (GW='$gateway') DESC, ID");
+                if (empty($row['ID'])) {
+                    $row = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices WHERE GW IN ('$gateway','') AND Z2M_TOPIC=''
+                        AND IEEEADDR NOT REGEXP '^0x[0-9a-fA-F]{16}$'
+                        AND (BINARY IEEEADDR=BINARY '$topic' OR BINARY TITLE=BINARY '$topic')
+                        ORDER BY (BINARY IEEEADDR=BINARY '$topic') DESC, (GW='$gateway') DESC, ID");
+                }
+                $existing = $row;
+            }
+
+            $definition = $device['definition'] ?? array();
+            $modelId = $device['model_id'] ?? '';
+            $model = $definition['model'] ?? $modelId;
+            $vendor = $definition['vendor'] ?? '';
+            $fields = array(
+                'MODEL' => $model, 'MODELID' => $modelId, 'DEVICE_NAME' => $modelId,
+                'MANUFNAME' => $device['manufacturer'] ?? '', 'MANUFACTURE' => $vendor,
+                'POWERSOURCE' => $device['power_source'] ?? '', 'NWKADDR' => $device['network_address'] ?? '',
+                'TYPE' => $device['type'] ?? '', 'SWBUILDID' => $device['software_build_id'] ?? '',
+                'Z2M_DESCRIPTION' => $definition['description'] ?? '',
+            );
+            foreach ($fields as $field => $value) {
+                if ($value !== '') {
+                    $row[$field] = (string)$value;
+                }
+            }
+            if (isset($definition['exposes']) && is_array($definition['exposes'])) {
+                $row['Z2M_EXPOSES'] = implode(', ', array_unique($this->exposedProperties($definition['exposes'])));
+            }
+            if (empty($row['SELECTTYPE']) && $model !== '') {
+                $catalogModel = str_replace('/', '-', $model);
+                $catalogKey = DBSafe($catalogModel);
+                $catalog = SQLSelectOne("SELECT model, vendor FROM zigbee2mqtt_devices_list WHERE model='$catalogKey' OR zigbeeModel='$catalogKey' ORDER BY (model='$catalogKey') DESC, ID");
+                if (!empty($catalog['model'])) {
+                    $row['SELECTTYPE'] = $catalog['model'];
+                } elseif (basename($catalogModel) === $catalogModel && is_file(ROOT . 'templates/zigbee2mqtt/img/' . $catalogModel . '.jpg')) {
+                    $row['SELECTTYPE'] = $catalogModel;
+                }
+                if (empty($row['SELECTVENDOR']) && !empty($catalog['vendor'])) {
+                    $row['SELECTVENDOR'] = $catalog['vendor'];
+                }
+            }
+            if (!empty($row['ID']) && !$coordinator) {
+                $oldName = $row['Z2M_TOPIC'] ?: $row['IEEEADDR'];
+                if ($oldName !== '' && $oldName !== $name) {
+                    $this->moveDeviceTopic((int)$row['ID'], $gw . '/' . $oldName, $gw . '/' . $name);
+                }
+                if ($row['Z2M_TOPIC'] === '' && $row['TITLE'] !== $name && $row['TITLE'] !== $oldName) {
+                    $this->moveDeviceTopic((int)$row['ID'], $gw . '/' . $row['TITLE'], $gw . '/' . $name);
+                }
+            }
+            $row['GW'] = $gw;
+            $row['IEEEADDR'] = $ieee;
+            $row['Z2M_TOPIC'] = $name;
+            if (!empty($row['ID'])) {
+                if ($row !== $existing) {
+                    SQLUpdate('zigbee2mqtt_devices', $row);
+                }
+            } else {
+                $row['TITLE'] = $name;
+                $row['FIND'] = date('Y-m-d H:i:s');
+                SQLInsert('zigbee2mqtt_devices', $row);
+            }
+        }
+    }
+
+    private function exposedProperties($exposes)
+    {
+        $properties = array();
+        foreach ($exposes as $expose) {
+            if (!empty($expose['property'])) {
+                $properties[] = $expose['property'];
+            }
+            if (!empty($expose['features'])) {
+                $properties = array_merge($properties, $this->exposedProperties($expose['features']));
+            }
+        }
+        return $properties;
+    }
+
+    private function moveDeviceTopic($deviceId, $old, $new)
+    {
+        $old = DBSafe($old);
+        $new = DBSafe($new);
+        $length = "CHAR_LENGTH('$old')";
+        $updates = array();
+        foreach (array('PATH', 'PATH_WRITE', 'TITLE') as $column) {
+            $updates[] = "$column=CASE WHEN BINARY $column=BINARY '$old'
+                OR BINARY LEFT($column, $length+1)=BINARY CONCAT('$old','/')
+                THEN CONCAT('$new', SUBSTRING($column, $length+1)) ELSE $column END";
+        }
+        SQLExec("UPDATE zigbee2mqtt SET " . implode(', ', $updates) . " WHERE DEV_ID=$deviceId");
+    }
+
     function parse_deviceinfo($ar, $gw)
     {
 
@@ -3720,7 +3865,10 @@ SQLIsert('zigbee2mqtt_devices', $res2);
 //debmes($json, 'zigbee2mqttparse');
 
 
-        $json = $json2->{'message'};
+        $json = $json2->{'message'} ?? array();
+        if (!is_array($json)) {
+            return;
+        }
 //debmes($json, 'zigbee2mqttparse');
 
         $total = count($json);
@@ -3737,8 +3885,11 @@ SQLIsert('zigbee2mqtt_devices', $res2);
 
 //if (ZMQTT_DEBUG=="1" ) debmes('cdev:'.$cdev, 'zigbee2mqtt');
 
-                $sql = "SELECT * FROM zigbee2mqtt_devices where IEEEADDR='" . $cdev . "'";
+                $sql = "SELECT * FROM zigbee2mqtt_devices where IEEEADDR='" . DBSafe($cdev) . "'";
                 $res2 = SQLSelectOne($sql);
+                if (!empty($res2['Z2M_TOPIC'])) {
+                    continue;
+                }
 
 //debmes($res2, 'zigbee2mqttparse');
 
@@ -3756,16 +3907,6 @@ SQLIsert('zigbee2mqtt_devices', $res2);
 
 
                 $temp = sqlselectone("SELECT * FROM zigbee2mqtt_devices_list where model='" . $model . "'");
-
-                if ($res2['TITLE'] == 'bridge') {
-                    $res2['MODEL'] = 'cc2531';
-                    $res2['TYPE'] = 'cc2531';
-                    $res2['MODELID'] = 'cc2531';
-                    $res2['MANUFACTURE'] = 'TI';
-                    $res2['SELECTVENDOR'] = 'TI';
-                    $res2['MODELID'] = 'cc2531';
-                }
-
 
 //if (!$res2['SELECTTYPE']) $res2['SELECTTYPE']=str_replace(  $json[$i]->{'model'}, '/', '-');
                 if (!$res2['SELECTTYPE']) $res2['SELECTTYPE'] = $model;
@@ -3822,7 +3963,10 @@ SQLIsert('zigbee2mqtt_devices', $res2);
                 }
 
 
-                if ($res2['TYPE'] == 'Coordinator') SQLExec('update zigbee2mqtt_devices set MANUFNAME="parse_deviceinfo", SELECTVENDOR="Texas Instruments", SELECTTYPE="cc2531", IEEEADDR="' . $res2['IEEEADDR'] . '" where TITLE="bridge"', $res2);
+                if ($res2['TYPE'] == 'Coordinator') {
+                    SQLExec("UPDATE zigbee2mqtt_devices SET IEEEADDR='" . DBSafe($cdev) . "', TYPE='Coordinator'
+                        WHERE TITLE='bridge' AND GW IN ('" . DBSafe($gw) . "','') AND Z2M_TOPIC=''");
+                }
             }
 
 
@@ -4601,6 +4745,9 @@ mqtt - MQTT
  zigbee2mqtt_devices: GROUPLIST varchar(100) NOT NULL DEFAULT '0'
  zigbee2mqtt_devices: HISTORY varchar(1) NOT NULL DEFAULT '1'
  zigbee2mqtt_devices: GW varchar(100) NOT NULL DEFAULT ''
+ zigbee2mqtt_devices: Z2M_TOPIC varchar(255) NOT NULL DEFAULT ''
+ zigbee2mqtt_devices: Z2M_DESCRIPTION text
+ zigbee2mqtt_devices: Z2M_EXPOSES text
 
 
  zigbee2mqtt_devices_list: ID int(10) unsigned NOT NULL auto_increment

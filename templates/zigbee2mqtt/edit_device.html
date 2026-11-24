@@ -202,6 +202,21 @@ GROUP (SELECT):
      <div class="input-group-btn">
      </div> </div> </div>
 
+     <div class="form-group">
+     <label class="control-label">Производитель (Zigbee)</label>
+     <div class="col-md-6 input-group"><input type="text" class="form-control" value="[#MANUFNAME#]" readonly></div>
+     </div>
+
+     <div class="form-group">
+     <label class="control-label">Бренд (Zigbee2MQTT)</label>
+     <div class="col-md-6 input-group"><input type="text" class="form-control" value="[#VENDOR#]" readonly></div>
+     </div>
+
+     <div class="form-group">
+     <label class="control-label">Возможности</label>
+     <div class="col-md-6 input-group"><textarea class="form-control" rows="2" readonly>[#SUPPORTS#]</textarea></div>
+     </div>
+
 
 
 <div class="form-group">
@@ -254,16 +269,13 @@ GROUP (SELECT):
 </td><td valign="top">
 
 
-[#if MODELNAME#]
+[#if SELECTTYPE#]
 <a href="https://www.zigbee2mqtt.io/devices/[#SELECTTYPE#]">
-<img src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg"   class="img-rounded" height="300" width="300">
+<img src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" class="img-rounded" height="300" width="300" onerror="this.onerror=null;this.src='../templates/zigbee2mqtt/img/unknow.jpg'">
 </a>
+[#else SELECTTYPE#]
+<img src="../templates/zigbee2mqtt/img/unknow.jpg" class="img-rounded" height="300" width="300" alt="">
 [#endif#]
-<!--
-[#if TITLE="bridge"#]
-<img src="../templates/zigbee2mqtt/img/cc2531.jpg"  height="300" width="300" class="img-rounded">
-[#endif#]
--->
 
 </td></tr>
 </table>
