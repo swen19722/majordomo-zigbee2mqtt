@@ -72,7 +72,9 @@ $topics = array();
 foreach ($query_list as $filter) {
     $base = explode('/', trim($filter), 2)[0];
     if ($base !== '' && strpbrk($base, '#+') === false) {
-        $topics[$base . '/bridge/devices'] = array("qos" => 0, "function" => "procmsg");
+        foreach (array('devices', 'info', 'state') as $topic) {
+            $topics[$base . '/bridge/' . $topic] = array("qos" => 0, "function" => "procmsg");
+        }
     }
 }
 // Receive the retained device list ahead of retained telemetry from wildcard filters.
@@ -136,7 +138,7 @@ function procmsg($topic, $msg) {
 
     if (!isset($topic) || !isset($msg)) return false;
 
-    if (preg_match('~^[^/]+/bridge/devices$~D', $topic)) {
+    if (preg_match('~^[^/]+/bridge/(devices|info|state)$~D', $topic)) {
         global $zigbee2mqtt;
         $zigbee2mqtt->processMessage($topic, $msg);
         return;

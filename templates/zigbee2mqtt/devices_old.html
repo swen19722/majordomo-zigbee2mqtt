@@ -117,9 +117,8 @@
 
 
  <td>
-[#if SELECTTYPE#]
-<img src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg"  height="62" width="62" class="img-rounded">
-[#endif#]
+[#inc device_image.html#]
+
 <!--
 [#if TITLE="bridge"#]
 <img src="../templates/zigbee2mqtt/img/cc2531.jpg"  height="52" width="52" class="img-rounded">
@@ -197,10 +196,12 @@
 
  <td
 [#if LOST#] style="color:lightgray;font-weight:bold"[#endif#]
->[#SELECTVENDOR#]</td>
+>[#CARD_BRAND#]</td>
  <td
 [#if LOST#] style="color:lightgray;font-weight:bold"[#endif#]
->[#SELECTTYPE#]</td>
+>[#CARD_MODEL#][#if CARD_MANUFACTURER#]<br><small>[#CARD_MANUFACTURER#]</small>[#endif#]
+[#if CARD_DESCRIPTION#]<br><small>[#CARD_DESCRIPTION#]</small>[#endif#]
+[#inc device_readings.html#]</td>
  <td
 [#if LOST#] style="color:lightgray;font-weight:bold"[#endif#]
 > [#LOCATION#] </td>

@@ -452,6 +452,10 @@ $basa=SQLSelectOne($sql);
 //print_r($res);
 //echo "<br>";
 //echo "<br>";
+   foreach ($res as &$device) {
+       $device += $this->deviceCard($device);
+   }
+   unset($device);
    $out['DEVICES']=$res;
 
 

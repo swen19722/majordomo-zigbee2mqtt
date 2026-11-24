@@ -38,20 +38,33 @@ DATASOURCE: [#DATA_SOURCE#]
 
    [#begin gwstatus#]
 
-[#if SEEN2==1#]
-<!--  <span class="label label-success" title="Приложение [#PERMITNAME#] работает [#SEEN#]">статус [#PERMITNAME#]</span>-->
-	[#else#]
-		<span class="label label-danger" title="Приложение [#PERMITNAME#] не работает [#SEEN#]">статус [#PERMITNAME#]</span>
-	[#endif#]
+[#if GATEWAY_STATUS="online"#]
+<span class="label label-success">[#PERMITNAME#] онлайн</span>
+[#else#]
+[#if GATEWAY_STATUS="offline"#]
+<span class="label label-danger">[#PERMITNAME#] офлайн</span>
+[#else#]
+<span class="label label-default">[#PERMITNAME#] · статус неизвестен</span>
+[#endif#]
+[#endif#]
 
-[#if PERMITSTATUS=="1"#]
-<span class="label label-success" title="Открыт для сопряжения">  <a href="?view_mode=stoppairing&gw=[#PERMITNAME#]"  title="Открыт для подключения новых устройств, нажатие переключит режим. " ><font color="white" >Сопряжение [#PERMITNAME#]</font></span></a>
-	[#else#]
-<span class="label label-danger" title="Закрыт  для сопряжения">   <a href="?view_mode=startpairing&gw=[#PERMITNAME#]"  title="Закрыт  для покдлючения новых устройств, нажатие переключит режим." ><font color="white" >Сопряжение [#PERMITNAME#]</font></span></a>
-	[#endif#]
-
+[#if GATEWAY_STATUS="offline"#]
+<span class="label label-default">Сопряжение недоступно</span>
+[#else#]
+[#if PAIRING_STATUS="open"#]
+<a class="label label-success" href="?view_mode=stoppairing&gw=[#PERMITNAME#]" title="Закрыть сопряжение">Сопряжение открыто</a>
+[#else#]
+[#if PAIRING_STATUS="closed"#]
+<a class="label label-default" href="?view_mode=startpairing&gw=[#PERMITNAME#]" title="Открыть сопряжение">Сопряжение закрыто</a>
+[#else#]
+<span class="label label-default">Статус сопряжения неизвестен</span>
+[#endif#]
+[#endif#]
+[#endif#]
 
    [#end gwstatus#]
+
+<span class="label label-default">Модуль v[#MODULE_VERSION#]</span>
 
 
 

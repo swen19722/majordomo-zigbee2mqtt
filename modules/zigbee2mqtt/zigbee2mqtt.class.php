@@ -15,6 +15,8 @@ ini_set('display_errors', 'off');
 
 class zigbee2mqtt extends module
 {
+    const VERSION = '1.0.1';
+
     /**
      * mqtt
      *
@@ -747,6 +749,14 @@ else
             $devices = json_decode($value, true);
             if (is_array($devices)) {
                 $this->updateBridgeDevices($devices, $bridge[1]);
+            }
+            return;
+        }
+
+        if (preg_match('~^[^/]+/bridge/info$~D', $path)) {
+            $info = json_decode($value, true);
+            if (isset($info['permit_join']) && is_bool($info['permit_join'])) {
+                $this->update_default($path . '/permit_join', $info['permit_join'] ? '1' : '0');
             }
             return;
         }
@@ -1532,6 +1542,7 @@ else
      */
     function admin(&$out)
     {
+        $out['MODULE_VERSION'] = self::VERSION;
         if (isset($this->data_source) && !$_GET['data_source'] && !$_POST['data_source']) {
             $out['SET_DATASOURCE'] = 1;
         }
@@ -1560,37 +1571,19 @@ else
         }
 
 
-        $query_list = explode(',', $this->config['MQTT_QUERY']);
-        $total = count($query_list);
-
-        for ($i = 0; $i < $total; $i++) {
-
-            $zz = explode('/', $query_list[$i])[0];
-            $sql = "select * from zigbee2mqtt where TITLE='$zz/bridge/config/permit_join'  ";
-            $permit = SQLSelectOne($sql);
-//debmes($sql, 'z2msql');
-
-//if $permit['VALUE']=
-            $out['gwstatus'][$i]['PERMITNAME'] = $zz;
-            $out['gwstatus'][$i]['PERMITSTATUS'] = $permit['VALUE'];
-//    $path = trim($query_list[$i]);
-//    $topics[$path] = array("qos" => 0, "function" => "procmsg");
-            $seen = SQLSelectOne("select * from zigbee2mqtt_log where TITLE like '%$zz%' order by FIND DESC  limit 1  ");
-            $out['gwstatus'][$i]['SEEN'] = $seen['FIND'];
-
-            if ((time() - strtotime($seen['FIND']) < 3600)) {
-                $out['gwstatus'][$i]['SEEN2'] = "1";
-            } else {
-                $out['gwstatus'][$i]['SEEN2'] = "0";
+        foreach ($this->gatewayNames() as $gateway) {
+            $state = $this->bridgeMetric($gateway . '/bridge/state');
+            $decoded = json_decode($state, true);
+            $state = $decoded['state'] ?? $state;
+            $permit = $this->bridgeMetric($gateway . '/bridge/info/permit_join');
+            if ($permit === '') {
+                $permit = $this->bridgeMetric($gateway . '/bridge/config/permit_join');
             }
-
-
-            if ($seen['MESSAGE'] == 'offline') {
-                $out['gwstatus'][$i]['SEEN2'] = "0";
-                $out['gwstatus'][$i]['PERMIT'] = 'false';
-
-            }
-
+            $out['gwstatus'][] = array(
+                'PERMITNAME' => $this->escapeDisplay($gateway),
+                'GATEWAY_STATUS' => in_array($state, array('online', 'offline'), true) ? $state : 'unknown',
+                'PAIRING_STATUS' => $permit === '' ? 'unknown' : (in_array($permit, array('1', 'true', 'on'), true) ? 'open' : 'closed'),
+            );
         }
 
 //print_r($_GET);
@@ -1679,7 +1672,7 @@ else
             $out['DEVICE_TITLE'] = $res['TITLE'];
             $out['DEVICE_ID'] = $res['ID'];
 
-            $out['MODEL'] = $res['MODEL'];
+            $out['MODEL'] = $this->escapeDisplay($res['MODEL'] ?: $res['MODELID']);
             $out['DEVICE_NAME'] = $res['DEVICE_NAME'];
             $out['MODELID'] = $res['MODELID'];
             $out['TYPE'] = $res['TYPE'];
@@ -1708,7 +1701,7 @@ else
 
 
             $res1 = SQLSelectOne("SELECT * FROM zigbee2mqtt_devices_list where model='" . DBSafe($res['SELECTTYPE']) . "'");
-            $out['MODELNAME'] = $res['MODEL'] ?: ($res1['model'] ?? '');
+            $out['MODELNAME'] = $this->escapeDisplay($res['MODEL'] ?: ($res1['model'] ?? ''));
 
 //$out['SELECTVENDOR']=$res1['vendor'];
 
@@ -1733,9 +1726,12 @@ else
 //$out['DESCRIPTION']=SQLSelectOne("SELECT * FROM zigbee2mqtt_devices_list where zigbeeModel='".$res['MODELID']."'");
 
             $out['EXTEND'] = $res1['extend'];
-            $out['SUPPORTS'] = htmlspecialchars(($res['Z2M_EXPOSES'] ?? '') ?: ($res1['supports'] ?? ''), ENT_QUOTES, 'UTF-8');
+            $out['SUPPORTS'] = $this->escapeDisplay(implode(', ', array_keys($this->deviceExposes($res))) ?: ($res1['supports'] ?? ''));
             $out['FROMZIGBEE'] = $res1['fromZigbee'];
             $out['TOZIGBEE'] = $res1['toZigbee'];
+            if ($this->tab === 'edit_device') {
+                $out += $this->deviceCard($res);
+            }
 
 
 //$tmp=SQLSelect("SELECT distinct replace(vendor,'/','-') vendor FROM zigbee2mqtt_devices_list ");
@@ -2722,25 +2718,17 @@ if ($property_id) {
         }
 
 
-        if ($this->view_mode == 'startpairing') {
-
-//$this->getConfig();
-//$zz=explode('/',$this->config['MQTT_QUERY'])[0];
-
-            $zz = $_GET['gw'];
-            $this->sendcommand($zz . '/bridge/config/permit_join', 'true');
-
-
-//  $this->redirect("?tab=service");
-            $location = $_GET['location'];
-            $vendor_id = $_GET['vendor_id'];
-            $type_id = $_GET['type_id'];
-            $vid_id = $_GET['vid_id'];
-            $group_list_id = $_GET['group_list_id'];
-
-//$this->redirect("?&location=$location&type_id=$type_id&vendor_id=$vendor_id&vid_id=$vid_id");
+        if ($this->view_mode === 'startpairing' || $this->view_mode === 'stoppairing') {
+            $gateway = $_GET['gw'] ?? '';
+            if (in_array($gateway, $this->gatewayNames(), true)) {
+                $enable = $this->view_mode === 'startpairing';
+                if ($this->bridgeMetric($gateway . '/bridge/info/permit_join') !== '') {
+                    $this->sendcommand($gateway . '/bridge/request/permit_join', json_encode(array('time' => $enable ? 254 : 0)));
+                } else {
+                    $this->sendcommand($gateway . '/bridge/config/permit_join', $enable ? 'true' : 'false');
+                }
+            }
             $this->redirect("?");
-
         }
 
 
@@ -2765,23 +2753,6 @@ if ($property_id) {
 
         }
 
-
-        if ($this->view_mode == 'stoppairing') {
-//$this->getConfig();
-//$zz=explode('/',$this->config['MQTT_QUERY'])[0];
-            $zz = $_GET['gw'];
-            $this->sendcommand($zz . '/bridge/config/permit_join', 'false');
-//  $this->redirect("?tab=service");
-            $location = $_GET['location'];
-            $vendor_id = $_GET['vendor_id'];
-            $type_id = $_GET['type_id'];
-            $vid_id = $_GET['vid_id'];
-            $group_list_id = $_GET['group_list_id'];
-
-//$this->redirect("?&location=$location&type_id=$type_id&vendor_id=$vendor_id&vid_id=$vid_id");
-            $this->redirect("?");
-
-        }
 
         if ($this->view_mode == 'resetznp') {
 
@@ -3782,7 +3753,7 @@ SQLIsert('zigbee2mqtt_devices', $res2);
                 }
             }
             if (isset($definition['exposes']) && is_array($definition['exposes'])) {
-                $row['Z2M_EXPOSES'] = implode(', ', array_unique($this->exposedProperties($definition['exposes'])));
+                $row['Z2M_EXPOSES'] = json_encode($this->exposedProperties($definition['exposes']), JSON_UNESCAPED_UNICODE);
             }
             if (empty($row['SELECTTYPE']) && $model !== '') {
                 $catalogModel = str_replace('/', '-', $model);
@@ -3825,14 +3796,119 @@ SQLIsert('zigbee2mqtt_devices', $res2);
     {
         $properties = array();
         foreach ($exposes as $expose) {
-            if (!empty($expose['property'])) {
-                $properties[] = $expose['property'];
+            if (!empty($expose['property']) && (($expose['access'] ?? 1) & 1)) {
+                $properties[$expose['property']] = array(
+                    'label' => $expose['label'] ?? '',
+                    'unit' => $expose['unit'] ?? '',
+                    'category' => $expose['category'] ?? '',
+                );
             }
             if (!empty($expose['features'])) {
-                $properties = array_merge($properties, $this->exposedProperties($expose['features']));
+                $properties += $this->exposedProperties($expose['features']);
             }
         }
         return $properties;
+    }
+
+    private function gatewayNames()
+    {
+        $gateways = array();
+        foreach (explode(',', $this->config['MQTT_QUERY'] ?: 'zigbee2mqtt/#') as $filter) {
+            $base = explode('/', trim($filter), 2)[0];
+            if ($base !== '' && strpbrk($base, '#+') === false) {
+                $gateways[] = $base;
+            }
+        }
+        return array_unique($gateways);
+    }
+
+    private function bridgeMetric($path)
+    {
+        $path = DBSafe($path);
+        $row = SQLSelectOne("SELECT VALUE FROM zigbee2mqtt WHERE BINARY PATH=BINARY '$path' ORDER BY UPDATED DESC, ID DESC");
+        return (string)($row['VALUE'] ?? '');
+    }
+
+    private function escapeDisplay($value)
+    {
+        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    private function deviceExposes($device)
+    {
+        $value = $device['Z2M_EXPOSES'] ?? '';
+        $parsed = json_decode($value, true);
+        return is_array($parsed) ? $parsed : array_fill_keys(preg_split('/,\s*/', $value, -1, PREG_SPLIT_NO_EMPTY), array());
+    }
+
+    private function deviceCard($device)
+    {
+        $model = $device['MODEL'] ?: ($device['MODELID'] ?: $device['SELECTTYPE']);
+        $exposes = $this->deviceExposes($device);
+        $common = array(
+            'temperature' => array('Температура', '°C'),
+            'humidity' => array('Влажность', '%'),
+            'battery' => array('Батарея', '%'),
+            'linkquality' => array('LQI', ''),
+        );
+        $properties = array_filter($exposes, function ($expose) {
+            return ($expose['category'] ?? '') !== 'config';
+        });
+        $properties += array_fill_keys(array_keys($common), array());
+        $metricNames = array_map('DBSafe', array_keys($properties));
+        $id = (int)$device['ID'];
+        $readings = array();
+        $metrics = SQLSelect("SELECT METRIKA, VALUE FROM zigbee2mqtt WHERE DEV_ID=$id AND METRIKA IN ('"
+            . implode("','", $metricNames) . "') ORDER BY UPDATED DESC, ID DESC");
+        foreach ($metrics as $metric) {
+            $property = $metric['METRIKA'];
+            if (!isset($properties[$property]) || isset($readings[$property]) || $metric['VALUE'] === '') {
+                continue;
+            }
+            $expose = $properties[$property];
+            $label = $common[$property][0] ?? (($expose['label'] ?? '') ?: $property);
+            $unit = ($expose['unit'] ?? '') ?: ($common[$property][1] ?? '');
+            $readings[$property] = array('READING_LABEL' => $this->escapeDisplay($label),
+                'READING_VALUE' => $this->escapeDisplay($metric['VALUE']), 'READING_UNIT' => $this->escapeDisplay($unit));
+        }
+
+        $icon = 'cog';
+        if (isset($exposes['temperature']) || isset($readings['temperature']) || isset($exposes['humidity'])) {
+            $icon = 'dashboard';
+        } elseif (isset($exposes['contact'])) {
+            $icon = 'modal-window';
+        } elseif (isset($exposes['occupancy'])) {
+            $icon = 'eye-open';
+        } elseif (isset($exposes['brightness'])) {
+            $icon = 'lamp';
+        } elseif (isset($exposes['state'])) {
+            $icon = 'flash';
+        } elseif ($device['TYPE'] === 'Coordinator') {
+            $icon = 'transfer';
+        }
+
+        $image = '';
+        $imageDir = 'templates/zigbee2mqtt/img/';
+        foreach (array_unique(array($model, $device['SELECTTYPE'])) as $name) {
+            $file = str_replace(array('/', '\\'), '-', $name) . '.jpg';
+            if ($name !== '' && is_file(ROOT . $imageDir . $file)) {
+                $image = '/' . $imageDir . rawurlencode($file);
+                break;
+            }
+        }
+        if ($image === '' && !empty($device['Z2M_TOPIC']) && $model !== '') {
+            $image = 'https://www.zigbee2mqtt.io/images/devices/' . rawurlencode($model) . '.png';
+        }
+
+        return array(
+            'CARD_MODEL' => $this->escapeDisplay($model),
+            'CARD_BRAND' => $this->escapeDisplay($device['MANUFACTURE'] ?: $device['SELECTVENDOR']),
+            'CARD_MANUFACTURER' => $this->escapeDisplay($device['MANUFNAME']),
+            'CARD_DESCRIPTION' => $this->escapeDisplay($device['Z2M_DESCRIPTION'] ?? ''),
+            'CARD_IMAGE' => $image,
+            'CARD_ICON' => $icon,
+            'CARD_READINGS' => array_values(array_intersect_key(array_replace($properties, $readings), $readings)),
+        );
     }
 
     private function moveDeviceTopic($deviceId, $old, $new)

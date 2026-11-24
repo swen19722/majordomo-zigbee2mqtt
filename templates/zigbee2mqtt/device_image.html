@@ -1,0 +1,7 @@
+<span class="text-center" style="display: inline-block; width: 64px">
+  [#if CARD_IMAGE#]<img src="[#CARD_IMAGE#]" alt="[#CARD_MODEL#]" width="64" height="64"
+    referrerpolicy="no-referrer" style="object-fit: contain"
+    onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block'">[#endif#]
+  <span class="glyphicon glyphicon-[#CARD_ICON#]" aria-hidden="true"
+    style="font-size: 32px; line-height: 64px; [#if CARD_IMAGE#]display: none[#endif#]"></span>
+</span>

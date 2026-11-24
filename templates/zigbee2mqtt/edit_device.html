@@ -269,13 +269,8 @@ GROUP (SELECT):
 </td><td valign="top">
 
 
-[#if SELECTTYPE#]
-<a href="https://www.zigbee2mqtt.io/devices/[#SELECTTYPE#]">
-<img src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" class="img-rounded" height="300" width="300" onerror="this.onerror=null;this.src='../templates/zigbee2mqtt/img/unknow.jpg'">
-</a>
-[#else SELECTTYPE#]
-<img src="../templates/zigbee2mqtt/img/unknow.jpg" class="img-rounded" height="300" width="300" alt="">
-[#endif#]
+[#inc device_image.html#]
+[#inc device_readings.html#]
 
 </td></tr>
 </table>

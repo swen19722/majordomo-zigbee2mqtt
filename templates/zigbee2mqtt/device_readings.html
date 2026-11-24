@@ -1,0 +1,7 @@
+[#if CARD_READINGS#]
+<div class="z2m-readings">
+  [#begin CARD_READINGS#]
+  <div><small>[#READING_LABEL#] <strong>[#READING_VALUE#]</strong>[#if READING_UNIT#] [#READING_UNIT#][#endif#]</small></div>
+  [#end CARD_READINGS#]
+</div>
+[#endif#]

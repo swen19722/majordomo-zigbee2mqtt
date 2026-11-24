@@ -716,43 +716,24 @@
 
 
 
-[#if CHANGEABLE#]
-<!--
-<a href="?view_mode=device_togle&id=[#DEVID#]&tab=&location=<#LOCATION_ID#>&type_id=<#ZIGBEE2MQTTDEV#>&vendor_id=<#VENDOR#>&vid_id=<#VID#>&group_list_id=<#group_list_id#>&friendlyname=[#IEEEADDR#]&gw=[#GW#]" title="Переключить">
--->
-<a href="#" onclick="return switch_z2m([#DEVID#],'state','toggle','[#IEEEADDR#]','[#GW#]', '','result[#ID#]');"   title="Переключить">
-
-[#if SELECTTYPE<>""#]		<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" alt="Device Logo" onerror="this.onerror=null;this.src='../templates/zigbee2mqtt/img/unknow.jpg'"></a>
-[#else SELECTTYPE#]	<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/unknow.jpg" alt="Unknow Logo"></a>[#endif SELECTTYPE#] 
-
-[#else#]
-[#if SELECTTYPE<>""#]		<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/[#SELECTTYPE#].jpg" alt="Device Logo" onerror="this.onerror=null;this.src='../templates/zigbee2mqtt/img/unknow.jpg'">
-[#else SELECTTYPE#]	<img class="card-img pull-left img-circle" src="../templates/zigbee2mqtt/img/unknow.jpg" alt="Unknow Logo">
-
-</a>[#endif SELECTTYPE#]
-[#endif#]
-
+<div class="pull-left" style="margin-right: 12px">
+[#if CHANGEABLE#]<a href="#" onclick="return switch_z2m([#DEVID#],'state','toggle','[#IEEEADDR#]','[#GW#]', '','result[#ID#]');" title="Переключить">[#endif#]
+[#inc device_image.html#]
+[#if CHANGEABLE#]</a>[#endif#]
+</div>
 
  <div class="caption">
 
 
 
-<!--          <div style="color:#999;font-size: 12px;[#if LOST#] ;color:lightgray;font-weight:bold[#endif#]">Модель[#if LOCATION#] ([#LOCATION#]) [#endif#]</div> -->
-
-
           <div class="pull-right">
             <div style="color:#999;font-size: 20px;[#if LOST#];color:lightgray; [#else#]color:black; [#endif#]">[#LINKED#]</div></div>
 
-
-          <div style="color:#999;font-size: 12px;[#if LOST#];color:lightgray; [#else#]color:black; [#endif#]">  
-          [#if SELECTVENDOR!=""#][#SELECTVENDOR#][#else#]
-&nbsp;[#endif#]
-          </div>
-
-          <div style="color:#999;font-size: 12px;[#if LOST#];color:lightgray; [#else#]color:black; [#endif#]">  
-          [#if SELECTTYPE!=""#][#SELECTTYPE#][#else#]
-&nbsp;[#endif#]
-          </div>
+          [#if CARD_MODEL#]<div><strong>[#CARD_MODEL#]</strong></div>[#endif#]
+          [#if CARD_MANUFACTURER#]<div><small>Производитель [#CARD_MANUFACTURER#]</small></div>[#endif#]
+          [#if CARD_BRAND#]<div><small>Бренд [#CARD_BRAND#]</small></div>[#endif#]
+          [#if CARD_DESCRIPTION#]<div><small>[#CARD_DESCRIPTION#]</small></div>[#endif#]
+          [#inc device_readings.html#]
 
           <div style="color:#999;font-size: 12px;[#if LOST#] ;color:lightgray;font-weight:bold[#endif#]">[#if LOCATION#] [#LOCATION#] [#else#]
 &nbsp;[#endif#]</div> 
